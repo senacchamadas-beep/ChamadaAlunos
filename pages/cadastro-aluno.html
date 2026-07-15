@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Cadastro Aluno • Chamada Senac</title>
+  <link rel="shortcut icon" href="../assets/src/img/icone.png" type="image/x-icon">
+  <link rel="stylesheet" href="../style.css" />
+</head>
+<body>
+  <main class="entry">
+    <div class="card">
+      <h1>📝 Cadastro de Aluno</h1>
+      <p class="muted">Aguarde aprovação de um professor após o cadastro</p>
+      <form id="reg-form" class="form">
+        <div>
+          <label>Nome completo</label>
+          <input type="text" id="nome" required />
+        </div>
+        <div>
+          <label>E-mail</label>
+          <input type="email" id="email" required />
+        </div>
+        <div>
+          <label>Senha</label>
+          <input type="password" id="senha" required minlength="4" />
+        </div>
+        <div class="form-actions">
+          <a href="../index.html" class="link">← Voltar</a>
+          <button type="submit" class="btn btn-primary">Cadastrar</button>
+        </div>
+      </form>
+    </div>
+  </main>
+  <script type="module" src="../js/modal.js"></script>
+  <script type="module">
+    import { db, collection, addDoc, query, where, getDocs, hashSenha, serverTimestamp } from "../js/firebase-config.js";
+    import { showModal } from "../js/modal.js";
+
+    document.getElementById("reg-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const nome = document.getElementById("nome").value.trim();
+      const email = document.getElementById("email").value.trim().toLowerCase();
+      const senha = document.getElementById("senha").value;
+      try {
+        const q = query(collection(db,"alunos"), where("email","==",email));
+        const snap = await getDocs(q);
+        if (!snap.empty) return showModal("E-mail já cadastrado","Use outro e-mail ou faça login.");
+        const senhaHash = await hashSenha(senha);
+        await addDoc(collection(db,"alunos"), {
+          nome, email, senha: senhaHash,
+          status: "pendente", salaId: null, salaNome: null,
+          createdAt: serverTimestamp()
+        });
+        await showModal("Cadastro enviado","Aguarde a aprovação de um professor para acessar.");
+        location.href = "../index.html";
+      } catch (err) {
+        console.error(err);
+        showModal("Erro","Não foi possível concluir o cadastro.");
+      }
+    });
+  </script>
+</body>
+</html>

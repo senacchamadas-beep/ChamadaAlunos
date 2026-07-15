@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Login Aluno • Chamada Senac</title>
+  <link rel="shortcut icon" href="assets/src/img/icone.png" type="image/x-icon">
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body class="auth-bg">
+  <div class="bg-orbs" aria-hidden="true">
+    <span class="orb orb-1"></span>
+    <span class="orb orb-2"></span>
+    <span class="orb orb-3"></span>
+  </div>
+
+  <main class="entry">
+    <div class="card glass fade-in">
+      <div class="brand">
+        <div class="brand-badge">🎓</div>
+        <h1>Chamada Senac</h1>
+        <p class="muted">Área do Aluno — acesse com seus dados</p>
+      </div>
+
+      <form id="login-form" class="form">
+        <div class="field">
+          <label for="email">E-mail</label>
+          <input type="email" id="email" required autocomplete="email" placeholder="voce@exemplo.com" />
+        </div>
+        <div class="field">
+          <label for="senha">Senha</label>
+          <input type="password" id="senha" required autocomplete="current-password" placeholder="••••••••" />
+        </div>
+        <button type="submit" class="btn btn-primary btn-block">Entrar</button>
+        <p class="muted center small">
+          Não tem conta? <a class="link" href="pages/cadastro-aluno.html">Cadastre-se</a>
+        </p>
+      </form>
+    </div>
+  </main>
+
+  <div id="modal" class="modal-overlay hidden">
+    <div class="modal">
+      <h3 id="modal-title"></h3>
+      <p id="modal-message"></p>
+      <div class="modal-actions">
+        <button id="modal-ok" class="btn btn-primary">OK</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="js/modal.js"></script>
+  <script type="module">
+    import { db, collection, query, where, getDocs, hashSenha, session } from "./js/firebase-config.js";
+    import { showModal } from "./js/modal.js";
+
+    document.getElementById("login-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const email = document.getElementById("email").value.trim().toLowerCase();
+      const senha = document.getElementById("senha").value;
+      try {
+        const senhaHash = await hashSenha(senha);
+        const q = query(collection(db,"alunos"), where("email","==",email));
+        const snap = await getDocs(q);
+        if (snap.empty) return showModal("Erro","E-mail não encontrado.");
+        const docSnap = snap.docs[0];
+        const aluno = { id: docSnap.id, ...docSnap.data() };
+        if (aluno.senha !== senhaHash) return showModal("Erro","Senha incorreta.");
+        if (aluno.status === "pendente") return showModal("Aguardando aprovação","Seu cadastro ainda não foi aprovado por um professor.");
+        if (aluno.status === "rejeitado") return showModal("Acesso negado","Seu cadastro foi rejeitado.");
+        session.setAluno(aluno);
+        location.href = "pages/aluno.html";
+      } catch (err) {
+        console.error(err);
+        showModal("Erro", "Não foi possível entrar. Tente novamente.");
+      }
+    });
+  </script>
+</body>
+</html>

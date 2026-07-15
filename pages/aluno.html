@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Meu Painel • Chamada Senac</title>
+  <link rel="shortcut icon" href="../assets/src/img/icone.png" type="image/x-icon">
+  <link rel="stylesheet" href="../style.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div>
+        <h2>🎓 Painel do Aluno</h2>
+        <div class="user" id="user-info"></div>
+      </div>
+      <button id="logout" class="btn btn-ghost btn-sm">Sair</button>
+    </header>
+
+    <div class="content">
+      <section class="section today-card">
+        <div class="date" id="today-date"></div>
+
+        <div class="field" style="margin:1rem 0">
+          <label for="sala-select">🏫 Selecione sua sala para bater o ponto</label>
+          <select id="sala-select" class="btn btn-ghost">
+            <option value="">Carregando salas…</option>
+          </select>
+        </div>
+
+        <div class="status" id="today-status">—</div>
+        <button id="btn-marcar" class="btn btn-primary" disabled>✔ Marcar minha presença</button>
+        <p class="muted" style="margin-top:1rem">Escolha a sala e registre sua presença. Não é possível editar ou remover registros.</p>
+      </section>
+
+      <section class="section">
+        <h3>📅 Minhas presenças</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Data</th><th>Sala</th><th>Registrado em</th></tr></thead>
+            <tbody id="tbody-presencas"><tr><td colspan="3" class="empty">Carregando…</td></tr></tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <script type="module" src="../js/modal.js"></script>
+  <script type="module">
+    import { db, collection, addDoc, query, where, getDocs, onSnapshot, serverTimestamp, session } from "../js/firebase-config.js";
+    import { showModal } from "../js/modal.js";
+
+    const aluno = session.getAluno();
+    if (!aluno) { location.href = "../index.html"; }
+
+    document.getElementById("user-info").textContent = `${aluno.nome}`;
+    document.getElementById("logout").onclick = () => { session.clear(); location.href = "../index.html"; };
+
+    const today = new Date();
+    const yyyy = today.getFullYear(), mm = String(today.getMonth()+1).padStart(2,"0"), dd = String(today.getDate()).padStart(2,"0");
+    const todayStr = `${yyyy}-${mm}-${dd}`;
+    document.getElementById("today-date").textContent =
+      today.toLocaleDateString("pt-BR",{weekday:"long",day:"2-digit",month:"long",year:"numeric"});
+
+    const statusEl = document.getElementById("today-status");
+    const btn = document.getElementById("btn-marcar");
+    const tbody = document.getElementById("tbody-presencas");
+    const salaSelect = document.getElementById("sala-select");
+
+    let jaPresenteHoje = false;
+    const LS_KEY = `sala_preferida_${aluno.id}`;
+
+    function updateBtnState(){
+      if (jaPresenteHoje) {
+        btn.disabled = true;
+        btn.textContent = "Presença já registrada";
+        btn.classList.remove("btn-primary");
+        btn.classList.add("btn-ghost");
+      } else {
+        btn.disabled = !salaSelect.value;
+        btn.textContent = salaSelect.value ? "✔ Marcar minha presença" : "Selecione uma sala";
+      }
+    }
+
+    function renderStatus(present){
+      jaPresenteHoje = present;
+      if (present) {
+        statusEl.textContent = "✅ Presente hoje";
+        statusEl.className = "status present";
+      } else {
+        statusEl.textContent = "⏳ Ainda não marcou";
+        statusEl.className = "status absent";
+      }
+      updateBtnState();
+    }
+
+    // Carregar salas disponíveis
+    (async () => {
+      try {
+        const snap = await getDocs(collection(db,"salas"));
+        const salas = snap.docs.map(d => ({ id:d.id, ...d.data() }));
+        salas.sort((a,b)=> (a.nome||"").localeCompare(b.nome||""));
+        if (salas.length === 0) {
+          salaSelect.innerHTML = `<option value="">Nenhuma sala disponível</option>`;
+          return;
+        }
+        const preferida = aluno.salaId || localStorage.getItem(LS_KEY) || "";
+        salaSelect.innerHTML =
+          `<option value="">— Selecione uma sala —</option>` +
+          salas.map(s => `<option value="${s.id}" data-nome="${s.nome||''}" ${s.id===preferida?"selected":""}>${s.nome||s.id}</option>`).join("");
+        updateBtnState();
+      } catch (err) {
+        console.error(err);
+        salaSelect.innerHTML = `<option value="">Erro ao carregar salas</option>`;
+      }
+    })();
+
+    salaSelect.addEventListener("change", () => {
+      if (salaSelect.value) localStorage.setItem(LS_KEY, salaSelect.value);
+      updateBtnState();
+    });
+
+    // Live query minhas presenças
+    const q = query(collection(db,"presencas"), where("alunoId","==",aluno.id));
+    onSnapshot(q, snap => {
+      const rows = snap.docs.map(d => ({id:d.id, ...d.data()}));
+      rows.sort((a,b)=> (b.data||"").localeCompare(a.data||""));
+      const hoje = rows.find(r => r.data === todayStr);
+      renderStatus(!!hoje);
+      if (rows.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="3" class="empty">Nenhuma presença registrada ainda.</td></tr>`;
+        return;
+      }
+      tbody.innerHTML = rows.map(r => {
+        const dt = new Date(r.data+"T00:00:00").toLocaleDateString("pt-BR",{weekday:"short",day:"2-digit",month:"2-digit",year:"numeric"});
+        const ts = r.timestamp?.toDate ? r.timestamp.toDate().toLocaleString("pt-BR") : "—";
+        return `<tr><td>${dt}</td><td>${r.salaNome||"—"}</td><td>${ts}</td></tr>`;
+      }).join("");
+    });
+
+    btn.addEventListener("click", async () => {
+      if (btn.disabled) return;
+      const salaId = salaSelect.value;
+      const salaNome = salaSelect.options[salaSelect.selectedIndex]?.dataset.nome || null;
+      if (!salaId) return showModal("Selecione uma sala","Escolha a sala antes de bater o ponto.");
+      try {
+        const q2 = query(collection(db,"presencas"), where("alunoId","==",aluno.id), where("data","==",todayStr));
+        const snap = await getDocs(q2);
+        if (!snap.empty) { renderStatus(true); return showModal("Já registrado","Sua presença de hoje já está marcada."); }
+        await addDoc(collection(db,"presencas"), {
+          alunoId: aluno.id,
+          alunoNome: aluno.nome,
+          salaId,
+          salaNome,
+          data: todayStr,
+          timestamp: serverTimestamp()
+        });
+        showModal("Presença registrada", `Sua presença de hoje foi marcada na sala ${salaNome||salaId}!`);
+      } catch (err) {
+        console.error(err);
+        showModal("Erro","Não foi possível registrar sua presença.");
+      }
+    });
+  </script>
+</body>
+</html>
